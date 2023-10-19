@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography.X509Certificates;
+﻿using Newtonsoft.Json;
+using System.Security.Cryptography.X509Certificates;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -11,10 +12,18 @@ using CancellationTokenSource cts = new();
 
 
 var quiz = new Quiz("data.txt");
+string StateFileName = "state.json";
+var States = new Dictionary<long, QuestionState>();
+if (File.Exists(StateFileName))
+{
+    var json = File.ReadAllText(StateFileName);
+    States = JsonConvert.DeserializeObject<Dictionary<long, QuestionState>>(json);
+}
 var token = "6625605730:AAG2mpJwAwXLCFeC_gyY8EUNnrKMesLbSRM";
 var bot = new TelegramBotClient(token);
-var States = new Dictionary<long,QuestionState>();
 var UserScores = new Dictionary<long, int>();
+
+
 ReceiverOptions receiverOptions = new()
 {
     AllowedUpdates = Array.Empty<UpdateType>() // receive all update types except ChatMember related updates
@@ -26,7 +35,11 @@ ReceiverOptions receiverOptions = new()
     receiverOptions: receiverOptions,
     cancellationToken: cts.Token
 );
-Console.ReadKey();
+
+var stateJson = JsonConvert.SerializeObject(States);
+File.WriteAllText(StateFileName, stateJson);
+Console.ReadLine();
+
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
 {
     // Only process Message updates: https://core.telegram.org/bots/api#message
@@ -47,11 +60,6 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     {
         state.CurrentItem = quiz.NextQuestion();
     }
-    
-
-    Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
-
-   
 
 
     var question = state.CurrentItem;
@@ -59,24 +67,23 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     if (tryAnswer == question.Answer)
     {
         //score++;
-        await botClient.SendTextMessageAsync(chatId: chatId,
-        text: "Правильно!",
-        cancellationToken: cancellationToken);
 
-        Console.WriteLine("Верно!");
-        if(UserScores.ContainsKey(message.From.Id))
+        var fromId = message.From.Id;
+        if(UserScores.ContainsKey(fromId))
         {
-            UserScores[message.From.Id]++;
+            UserScores[fromId]++;
         }
         else
         {
-            UserScores[message.From.Id] = 1;
+            UserScores[fromId] = 1;
         }
+      
         state.CurrentItem = quiz.NextQuestion();
         //Console.WriteLine($" У вас{score} очков");
         await botClient.SendTextMessageAsync(chatId: chatId,
-        text: $"У вас {UserScores} очков",
+        text: $"Верно! \n У вас {UserScores[fromId]} очков",
         cancellationToken: cancellationToken);
+        NewRound(chatId);
 
 
     }
@@ -89,14 +96,13 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         text: $"Правильный ответ: {question.Answer}",
         cancellationToken: cancellationToken);
 
+            NewRound(chatId);
             Console.WriteLine($"Правильный ответ: {question.Answer}");
         }
-        await botClient.SendTextMessageAsync(chatId: chatId,
-        text: "Не правильно!",
-        cancellationToken: cancellationToken);
+        //await botClient.SendTextMessageAsync(chatId: chatId,
+        //text: state.DisplayQuestion,
+        //cancellationToken: cancellationToken);
 
-        Console.WriteLine("Не верно!");
-        //opened++;
     }
     await botClient.SendTextMessageAsync(chatId: chatId,
         text: state.DisplayQuestion,
@@ -104,7 +110,17 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     // Echo received message text
     void NewRound(long chatId)
     {
+        if(!States.TryGetValue(chatId, out var state))
+        {
+            state = new QuestionState();
+            States[chatId] = state;
+        }
+        state.CurrentItem = quiz.NextQuestion();
+        state.Opened = 0;
 
+        //botClient.SendTextMessageAsync(chatId: chatId,
+        //text: state.DisplayQuestion,
+        //cancellationToken: cancellationToken);
     }
 
 }
