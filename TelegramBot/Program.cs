@@ -17,19 +17,9 @@ var token = "6625605730:AAG2mpJwAwXLCFeC_gyY8EUNnrKMesLbSRM";
 var bot = new TelegramBotClient(token);
 var States = new Dictionary<long, QuestionState>();
 var UserScores = new Dictionary<long, int>();
-string StateFileName = "state.json";
-string ScoreFileName = "score.json";
 
-if (File.Exists(StateFileName))
-{
-    var json = File.ReadAllText(StateFileName);
-    States = JsonConvert.DeserializeObject<Dictionary<long, QuestionState>>(json);
-}
-if (File.Exists(ScoreFileName))
-{
-    var json = File.ReadAllText(ScoreFileName);
-    UserScores = JsonConvert.DeserializeObject<Dictionary<long, int>>(json);
-}
+GameData gameData = new GameData();
+gameData.LoadGame(ref States, ref UserScores);
 
 ReceiverOptions receiverOptions = new()
 {
@@ -57,7 +47,7 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         return;
 
     var chatId = message.Chat.Id;
-
+    var fromId = message.From.Id;
     if (!States.TryGetValue(chatId, out var state))
     {
         state = new QuestionState();
@@ -68,68 +58,54 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         state.CurrentItem = quiz.NextQuestion();
     }
 
-
     Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
-
-
-
 
     var question = state.CurrentItem;
     var tryAnswer = messageText.ToLower().Replace('ё', 'е');
     if (tryAnswer == question.Answer)
     {
         //score++;
-        await botClient.SendTextMessageAsync(chatId: chatId,
-        text: "Правильно!",
-        cancellationToken: cancellationToken);
+        await botClient.SendTextMessageAsync(chatId, "Правильно!",
+            cancellationToken: cancellationToken);
         state.Opened = 0;
         Console.WriteLine("Верно!");
-        if (UserScores.ContainsKey(message.From.Id))
-        {
-            UserScores[message.From.Id]++;
-        }
+        if (UserScores.ContainsKey(fromId))
+            UserScores[fromId]++;
+
         else
-        {
-            UserScores[message.From.Id] = 1;
-        }
+            UserScores[fromId] = 1;
+
         state.CurrentItem = quiz.NextQuestion();
-        //Console.WriteLine($" У вас{score} очков");
-        await botClient.SendTextMessageAsync(chatId: chatId,
-        text: $"У вас {UserScores[message.From.Id]} очков",
+
+        await botClient.SendTextMessageAsync(chatId,
+        $"У вас {UserScores[fromId]} очков",
         cancellationToken: cancellationToken);
-
-
     }
     else
     {
-        await botClient.SendTextMessageAsync(chatId: chatId,
-        text: "Не правильно!",
+        await botClient.SendTextMessageAsync(chatId,
+        "Не правильно!",
         cancellationToken: cancellationToken);
 
         state.Opened++;
         if (state.IsEnd)
         {
-            await botClient.SendTextMessageAsync(chatId: chatId,
-            text: $"Правильный ответ: {question.Answer}",
+            await botClient.SendTextMessageAsync(chatId,
+            $"Правильный ответ: {question.Answer}",
             cancellationToken: cancellationToken);
             state.Opened = 0;
             state.CurrentItem = quiz.NextQuestion();
             Console.WriteLine($"Правильный ответ: {question.Answer}");
-        }    
+        }
 
         Console.WriteLine("Не верно!");
-        //opened++;
     }
-    await botClient.SendTextMessageAsync(chatId: chatId,
-        text: state.DisplayQuestion,
+
+    await botClient.SendTextMessageAsync(chatId,
+        state.DisplayQuestion,
         cancellationToken: cancellationToken);
-    // Echo received message text
 
-    var stateJson = JsonConvert.SerializeObject(States);
-    File.WriteAllText(StateFileName, stateJson);
-
-    var scoreJson = JsonConvert.SerializeObject(UserScores);
-    File.WriteAllText(ScoreFileName, scoreJson);
+    gameData.SaveGame(States, UserScores);
 }
 
 Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
