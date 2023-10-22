@@ -5,6 +5,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using TelegramBot;
 using static System.Formats.Asn1.AsnWriter;
 using File = System.IO.File;
 
@@ -12,33 +13,39 @@ using CancellationTokenSource cts = new();
 
 
 var quiz = new Quiz("data.txt");
-string StateFileName = "state.json";
+var token = "6625605730:AAG2mpJwAwXLCFeC_gyY8EUNnrKMesLbSRM";
+var bot = new TelegramBotClient(token);
 var States = new Dictionary<long, QuestionState>();
+var UserScores = new Dictionary<long, int>();
+string StateFileName = "state.json";
+string ScoreFileName = "score.json";
+
 if (File.Exists(StateFileName))
 {
     var json = File.ReadAllText(StateFileName);
     States = JsonConvert.DeserializeObject<Dictionary<long, QuestionState>>(json);
 }
-var token = "6625605730:AAG2mpJwAwXLCFeC_gyY8EUNnrKMesLbSRM";
-var bot = new TelegramBotClient(token);
-var UserScores = new Dictionary<long, int>();
-
+if (File.Exists(ScoreFileName))
+{
+    var json = File.ReadAllText(ScoreFileName);
+    UserScores = JsonConvert.DeserializeObject<Dictionary<long, int>>(json);
+}
 
 ReceiverOptions receiverOptions = new()
 {
     AllowedUpdates = Array.Empty<UpdateType>() // receive all update types except ChatMember related updates
 };
 
-    bot.StartReceiving(
-    updateHandler: HandleUpdateAsync,
-    pollingErrorHandler: HandlePollingErrorAsync,
-    receiverOptions: receiverOptions,
-    cancellationToken: cts.Token
+bot.StartReceiving(
+updateHandler: HandleUpdateAsync,
+pollingErrorHandler: HandlePollingErrorAsync,
+receiverOptions: receiverOptions,
+cancellationToken: cts.Token
 );
+Console.ReadKey();
 
-var stateJson = JsonConvert.SerializeObject(States);
-File.WriteAllText(StateFileName, stateJson);
-Console.ReadLine();
+
+
 
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
 {
@@ -56,10 +63,15 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         state = new QuestionState();
         States[chatId] = state;
     }
-    if(state.CurrentItem == null)
+    if (state.CurrentItem == null)
     {
         state.CurrentItem = quiz.NextQuestion();
     }
+
+
+    Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
+
+
 
 
     var question = state.CurrentItem;
@@ -67,62 +79,57 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     if (tryAnswer == question.Answer)
     {
         //score++;
-
-        var fromId = message.From.Id;
-        if(UserScores.ContainsKey(fromId))
+        await botClient.SendTextMessageAsync(chatId: chatId,
+        text: "Правильно!",
+        cancellationToken: cancellationToken);
+        state.Opened = 0;
+        Console.WriteLine("Верно!");
+        if (UserScores.ContainsKey(message.From.Id))
         {
-            UserScores[fromId]++;
+            UserScores[message.From.Id]++;
         }
         else
         {
-            UserScores[fromId] = 1;
+            UserScores[message.From.Id] = 1;
         }
-      
         state.CurrentItem = quiz.NextQuestion();
         //Console.WriteLine($" У вас{score} очков");
         await botClient.SendTextMessageAsync(chatId: chatId,
-        text: $"Верно! \n У вас {UserScores[fromId]} очков",
+        text: $"У вас {UserScores[message.From.Id]} очков",
         cancellationToken: cancellationToken);
-        NewRound(chatId);
 
 
     }
     else
     {
+        await botClient.SendTextMessageAsync(chatId: chatId,
+        text: "Не правильно!",
+        cancellationToken: cancellationToken);
+
         state.Opened++;
         if (state.IsEnd)
         {
-        await botClient.SendTextMessageAsync(chatId: chatId,
-        text: $"Правильный ответ: {question.Answer}",
-        cancellationToken: cancellationToken);
-
-            NewRound(chatId);
+            await botClient.SendTextMessageAsync(chatId: chatId,
+            text: $"Правильный ответ: {question.Answer}",
+            cancellationToken: cancellationToken);
+            state.Opened = 0;
+            state.CurrentItem = quiz.NextQuestion();
             Console.WriteLine($"Правильный ответ: {question.Answer}");
-        }
-        //await botClient.SendTextMessageAsync(chatId: chatId,
-        //text: state.DisplayQuestion,
-        //cancellationToken: cancellationToken);
+        }    
 
+        Console.WriteLine("Не верно!");
+        //opened++;
     }
     await botClient.SendTextMessageAsync(chatId: chatId,
         text: state.DisplayQuestion,
         cancellationToken: cancellationToken);
     // Echo received message text
-    void NewRound(long chatId)
-    {
-        if(!States.TryGetValue(chatId, out var state))
-        {
-            state = new QuestionState();
-            States[chatId] = state;
-        }
-        state.CurrentItem = quiz.NextQuestion();
-        state.Opened = 0;
 
-        //botClient.SendTextMessageAsync(chatId: chatId,
-        //text: state.DisplayQuestion,
-        //cancellationToken: cancellationToken);
-    }
+    var stateJson = JsonConvert.SerializeObject(States);
+    File.WriteAllText(StateFileName, stateJson);
 
+    var scoreJson = JsonConvert.SerializeObject(UserScores);
+    File.WriteAllText(ScoreFileName, scoreJson);
 }
 
 Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
@@ -137,44 +144,4 @@ Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, 
     Console.WriteLine(ErrorMessage);
     return Task.CompletedTask;
 }
-public class Quiz
-{
-    List<QuestionItem> Questions { get; set; }
 
-    private Random random;
-    private int count;
-    public Quiz(string path = "data.txt")
-    {
-        var lines = File.ReadAllLines(path);
-        Questions = lines.Select(s => s.Split("|")).Select(s => new QuestionItem
-        {
-            Question = s[0],
-            Answer = s[1]
-        }).ToList();
-        random = new Random();
-        count = Questions.Count;
-    }
-
-    public QuestionItem NextQuestion()
-    {
-        var index = random.Next(count - 1);
-        var question = Questions[index];
-        return question;
-    }
-    
-}
-public class QuestionItem
-{
-    public string Question { get; set; }
-    public string Answer { get; set; }
-}
-
-public class QuestionState
-{
-    public QuestionItem CurrentItem { get; set; }
-    public int Opened { get; set; } 
-    public string AnswerHint => CurrentItem.Answer.Substring(0, Opened).PadRight(CurrentItem.Answer.Length, '*');
-    public string DisplayQuestion => $"{CurrentItem.Question} :  {CurrentItem.Answer.Length} букв \n" +
-        $" {AnswerHint}";
-    public bool IsEnd => Opened == CurrentItem.Answer.Length;
-}
