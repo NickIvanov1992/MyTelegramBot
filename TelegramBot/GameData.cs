@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ namespace TelegramBot
     {
         private readonly string StateFileName = "state.json";
         private readonly string ScoreFileName = "score.json";
+        private Dictionary<long, int> currentMaxScore = new() ;   // сюда записываем рекорды
         User user = new();
         Quiz quiz = new("data.txt");
         public GameData(User user, Quiz quiz)
@@ -31,14 +33,11 @@ namespace TelegramBot
             {
                 var json = File.ReadAllText(ScoreFileName);
                 user.UserScores = JsonConvert.DeserializeObject<Dictionary<long, int>>(json);
+                currentMaxScore = JsonConvert.DeserializeObject<Dictionary<long, int>>(json);
             }
         }
-
-        public void SaveGame(Dictionary<long, QuestionState> States, Dictionary<long, int> UserScores)
+        public void SaveScores(Dictionary<long, int> UserScores)
         {
-            var stateJson = JsonConvert.SerializeObject(States);
-            File.WriteAllText(StateFileName, stateJson);
-
             var scoreJson = JsonConvert.SerializeObject(UserScores);
             File.WriteAllText(ScoreFileName, scoreJson);
         }
@@ -47,19 +46,15 @@ namespace TelegramBot
             var stateJson = JsonConvert.SerializeObject(States);
             File.WriteAllText(StateFileName, stateJson);
         }
-        public void SaveScores(Dictionary<long, int> UserScores, long fromId)
-        {
-            var scoreJson = JsonConvert.SerializeObject(UserScores);
-            File.WriteAllText(ScoreFileName, scoreJson);
-
-        }
         public void CheckUserState(long chatId, long fromId)
         {
             if (!user.States.TryGetValue(chatId, out var state))
             {
                 state = new QuestionState();
                 user.States[chatId] = state;
-                user.UserScores[fromId] = 5;
+                user.UserScores[fromId] = 5; // установим 5 очков в начале игры
+                currentMaxScore[fromId] = 5;
+                SaveScores(user.UserScores);
             }
             if (state.CurrentItem == null)
             {
@@ -73,11 +68,16 @@ namespace TelegramBot
                 user.States[chatId].Opened = 0;
                 Console.WriteLine("Верно!");
 
-                user.UserScores[fromId]++;
+                user.UserScores[fromId]+=2;
 
-                user.States[chatId].CurrentItem = quiz.NextQuestion();
+                if (user.UserScores[fromId] > currentMaxScore[fromId])
+                {
+                    SaveScores(user.UserScores);
+                    currentMaxScore[fromId] = user.UserScores[fromId];
+                }
+                    
 
-
+                    user.States[chatId].CurrentItem = quiz.NextQuestion();
                 return $"Правильно! У вас {user.UserScores[fromId]} очков";
             }
             else if (answer != item.Answer && user.UserScores[fromId] > 1)
@@ -103,7 +103,7 @@ namespace TelegramBot
                 return $"Игра началась! \n" +
                     $" У вас {user.UserScores[fromId]} очков";
             }
-            else /*if (user.UserScores[fromId] == 0)*/
+            else
             {
                 user.States[chatId].Opened = 0;
                 user.UserScores[fromId] = 0;
@@ -113,19 +113,21 @@ namespace TelegramBot
 
                 return $"Игра окончена. У вас 0 очков. \n " +
                             $"Правильный ответ: {item.Answer} \n" +
-                            $"РЕКОРДЫ:\n" +
-                            $" {GetGameRecords(user)}";
+                            $"Ваш рекорд: {currentMaxScore[fromId]} очков \n" +
+                            $"\n РЕКОРДЫ:\n" +
+                            $" {GetGameRecords(currentMaxScore)}";
             }
         }
-        public string GetGameRecords(User users)
+        public string GetGameRecords(Dictionary<long, int> maxScores)
         {
-
             List<string> scores = new List<string>();
-            foreach (var user in users.UserScores)
+            
+            foreach (var maxScore in maxScores)
             {
-                scores.Add($"Имя: {user.Key} Очков: {user.Value}");
+                scores.Add($"Пользователь: {maxScore.Key.ToString().Remove(0,6)} Очков: {maxScore.Value}");
             }
             var result = String.Join(",", scores.ToArray());
+
             return result;
         }
     }

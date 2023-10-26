@@ -8,15 +8,14 @@ using Telegram.Bot.Types.Enums;
 using TelegramBot;
 using static System.Formats.Asn1.AsnWriter;
 using File = System.IO.File;
-
 using CancellationTokenSource cts = new();
 
 
 var quiz = new Quiz("data.txt");
 var token = "6625605730:AAG2mpJwAwXLCFeC_gyY8EUNnrKMesLbSRM";
 var bot = new TelegramBotClient(token);
-TelegramBot.User user = new TelegramBot.User();
-GameData gameData = new GameData(user, quiz);
+TelegramBot.User user = new();
+GameData gameData = new(user, quiz);
 gameData.LoadGame();
 
 ReceiverOptions receiverOptions = new()
@@ -44,6 +43,7 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
 
     var chatId = message.Chat.Id;
     var fromId = message.From.Id;
+
     gameData.CheckUserState(chatId, fromId);
 
     Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
@@ -68,7 +68,7 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         "Для начала игры отправьте: 'start' ",
         cancellationToken: cancellationToken);
     }
-    gameData.SaveGame(user.States, user.UserScores);
+    gameData.SaveState(user.States);
 }
 
 Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
