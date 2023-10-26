@@ -8,18 +8,15 @@ using Telegram.Bot.Types.Enums;
 using TelegramBot;
 using static System.Formats.Asn1.AsnWriter;
 using File = System.IO.File;
-
 using CancellationTokenSource cts = new();
 
 
 var quiz = new Quiz("data.txt");
 var token = "6625605730:AAG2mpJwAwXLCFeC_gyY8EUNnrKMesLbSRM";
 var bot = new TelegramBotClient(token);
-var States = new Dictionary<long, QuestionState>();
-var UserScores = new Dictionary<long, int>();
-
-GameData gameData = new GameData();
-gameData.LoadGame(ref States, ref UserScores);
+TelegramBot.User user = new();
+GameData gameData = new(user, quiz);
+gameData.LoadGame();
 
 ReceiverOptions receiverOptions = new()
 {
@@ -35,8 +32,6 @@ cancellationToken: cts.Token
 Console.ReadKey();
 
 
-
-
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
 {
     // Only process Message updates: https://core.telegram.org/bots/api#message
@@ -48,64 +43,32 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
 
     var chatId = message.Chat.Id;
     var fromId = message.From.Id;
-    if (!States.TryGetValue(chatId, out var state))
-    {
-        state = new QuestionState();
-        States[chatId] = state;
-    }
-    if (state.CurrentItem == null)
-    {
-        state.CurrentItem = quiz.NextQuestion();
-    }
+
+    gameData.CheckUserState(chatId, fromId);
 
     Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
 
-    var question = state.CurrentItem;
+    var question = user.States[chatId].CurrentItem;
     var tryAnswer = messageText.ToLower().Replace('ё', 'е');
-    if (tryAnswer == question.Answer)
+
+    string value = gameData.CheckState(question, tryAnswer, chatId, fromId);
+
+    await botClient.SendTextMessageAsync(chatId,
+        value, cancellationToken: cancellationToken);
+
+    if (user.UserScores[fromId] > 0)
     {
-        //score++;
-        await botClient.SendTextMessageAsync(chatId, "Правильно!",
-            cancellationToken: cancellationToken);
-        state.Opened = 0;
-        Console.WriteLine("Верно!");
-        if (UserScores.ContainsKey(fromId))
-            UserScores[fromId]++;
-
-        else
-            UserScores[fromId] = 1;
-
-        state.CurrentItem = quiz.NextQuestion();
-
         await botClient.SendTextMessageAsync(chatId,
-        $"У вас {UserScores[fromId]} очков",
+        user.States[chatId].DisplayQuestion,
         cancellationToken: cancellationToken);
     }
     else
     {
         await botClient.SendTextMessageAsync(chatId,
-        "Не правильно!",
+        "Для начала игры отправьте: 'start' ",
         cancellationToken: cancellationToken);
-
-        state.Opened++;
-        if (state.IsEnd)
-        {
-            await botClient.SendTextMessageAsync(chatId,
-            $"Правильный ответ: {question.Answer}",
-            cancellationToken: cancellationToken);
-            state.Opened = 0;
-            state.CurrentItem = quiz.NextQuestion();
-            Console.WriteLine($"Правильный ответ: {question.Answer}");
-        }
-
-        Console.WriteLine("Не верно!");
     }
-
-    await botClient.SendTextMessageAsync(chatId,
-        state.DisplayQuestion,
-        cancellationToken: cancellationToken);
-
-    gameData.SaveGame(States, UserScores);
+    gameData.SaveState(user.States);
 }
 
 Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
@@ -120,4 +83,3 @@ Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, 
     Console.WriteLine(ErrorMessage);
     return Task.CompletedTask;
 }
-

@@ -1,17 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace TelegramBot
+﻿namespace TelegramBot
 {
     public class Quiz
     {
         List<QuestionItem> Questions { get; set; }
 
-        private Random random;
-        private int count;
+        private readonly Random random;
+        private readonly int count;
         public Quiz(string path)
         {
             var lines = File.ReadAllLines(path);
@@ -30,6 +24,5 @@ namespace TelegramBot
             var question = Questions[index];
             return question;
         }
-
     }
 }
